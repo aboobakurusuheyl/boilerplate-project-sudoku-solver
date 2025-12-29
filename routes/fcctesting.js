@@ -60,17 +60,40 @@ module.exports = function (app) {
 
   app.get('/_api/get-tests', cors(), function(req, res, next){
     console.log('requested');
-    if(process.env.NODE_ENV === 'test') return next();
-    res.json({status: 'unavailable'});
+    // If tests have already run, return them immediately
+    if(runner.report) {
+      return res.json(testFilter(runner.report, req.query.type, req.query.n));
+    }
+    // If NODE_ENV is not 'test', trigger test runner
+    if(process.env.NODE_ENV !== 'test') {
+      try {
+        runner.run();
+      } catch(e) {
+        console.error('Error running tests:', e);
+      }
+    }
+    return next();
   },
   function(req, res, next){
     if(!runner.report) return next();
     res.json(testFilter(runner.report, req.query.type, req.query.n));
   },
   function(req, res){
+    // Set a timeout to prevent hanging
+    const timeout = setTimeout(() => {
+      res.json([]);
+    }, 10000);
+    
     runner.on('done', function(report){
+      clearTimeout(timeout);
       process.nextTick(() =>  res.json(testFilter(runner.report, req.query.type, req.query.n)));
     });
+    
+    // If runner is already done, return immediately
+    if(runner.report) {
+      clearTimeout(timeout);
+      return res.json(testFilter(runner.report, req.query.type, req.query.n));
+    }
   });
   app.get('/_api/app-info', function(req, res) {
     let hs = Object.keys(res._headers)
